@@ -47,6 +47,8 @@ import type {
   UpdateState,
 } from "../features/update/types";
 import { BackgroundLayer } from "./BackgroundLayer";
+import { SyncBadge } from "../features/sync/SyncSettingsSection";
+import { useSyncEditor } from "../features/sync/useSyncStatus";
 import { POPUP_VIEWPORT_MARGIN, useViewportPopupPosition } from "./popupPosition";
 import { SlidingButtonGroup } from "./SlidingButtonGroup";
 import {
@@ -452,6 +454,7 @@ export function MainWindow({
     [notes, selectedId],
   );
   const selectedNoteRef = useRef(selectedNote);
+  useSyncEditor(selectedNote?.id ?? null, saveState === "dirty" || saveState === "saving");
   selectedNoteRef.current = selectedNote;
 
   const selectedExternalFile = useMemo(
@@ -1995,6 +1998,7 @@ export function MainWindow({
             </span>
           </div>
           <div className="flex items-center">
+            <SyncBadge onOpenSettings={() => void handleOpenSettings()} />
             <button
               onClick={() => void handleOpenNotepad()}
               className="w-10 h-11 flex items-center justify-center text-ink-ghost hover:text-bamboo hover:bg-bamboo-mist/50 transition-all cursor-pointer"

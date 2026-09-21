@@ -2,6 +2,10 @@
 
 **简体中文** | [繁體中文](README_zh-HK.md) | [English](README_en-US.md)
 
+> **LarkNote 飞书同步开发版**：本目录从 Achilng/floral-notepaper 完整克隆并增量开发，保留原版 React/Tauri 桌面界面、Markdown、小窗与磁贴。新增飞书多维表格双向同步。
+>
+> 启动与连接配置见 [飞书同步使用说明](Docs/LARK_SYNC.md)，实际验收范围见 [验收记录](Docs/LARK_SYNC_VALIDATION.md)。原项目介绍与 MIT 许可保留如下。
+
 <div align="center">
 
 <img src="./src-tauri/icons/icon.png" width="120" alt="花笺图标">

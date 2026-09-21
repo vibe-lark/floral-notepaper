@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSyncEditor } from "../features/sync/useSyncStatus";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -130,9 +131,12 @@ export function NotePad({
   const [mode, setMode] = useState<OpenMode>("new");
   const [notes, setNotes] = useState<NoteMetadata[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const editingNoteIdRef = useRef(editingNoteId);
+  editingNoteIdRef.current = editingNoteId;
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [status, setStatus] = useState<NotePadStatus>("empty");
+  useSyncEditor(editingNoteId, status === "dirty" || status === "saveFailed");
   const [noteSurfaceAutoSave, setNoteSurfaceAutoSave] = useState(initialAutoSave);
   const [tileColorRaw, setTileColorRaw] = useState(normalizeTileColor(initialTileColor));
   const [tileColorMode, setTileColorMode] = useState<TileColorMode>("system");
@@ -238,6 +242,30 @@ export function NotePad({
   useEffect(() => {
     const unlisten = listen("notes-changed", () => {
       void refreshNotes().catch(() => undefined);
+      const id = editingNoteIdRef.current;
+      const titleBefore = titleValueRef.current;
+      const contentBefore = contentValueRef.current;
+      if (
+        !id ||
+        dormantRef.current ||
+        statusRef.current === "dirty" ||
+        statusRef.current === "saveFailed"
+      )
+        return;
+      void getNote(id)
+        .then((note) => {
+          if (
+            editingNoteIdRef.current !== id ||
+            statusRef.current === "dirty" ||
+            statusRef.current === "saveFailed" ||
+            titleValueRef.current !== titleBefore ||
+            contentValueRef.current !== contentBefore
+          )
+            return;
+          setTitle(note.title);
+          setContent(note.content);
+        })
+        .catch(() => undefined);
     });
     return () => {
       void unlisten.then((fn) => fn());

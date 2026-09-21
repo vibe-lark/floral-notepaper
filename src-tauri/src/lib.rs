@@ -1,5 +1,6 @@
 pub mod desktop;
 pub mod json_io;
+mod lark_sync_commands;
 pub mod locales;
 pub mod services;
 pub mod updater;
@@ -9,6 +10,16 @@ use services::notes::{default_store, AppConfig, AppError, Note, NoteMetadata, Sa
 use std::{env, fs, io::Write, path::PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
 
+impl From<tauri::Error> for AppError {
+    fn from(error: tauri::Error) -> Self {
+        Self {
+            code: "tauri".into(),
+            message: error.to_string(),
+            details: Default::default(),
+        }
+    }
+}
+
 #[tauri::command]
 fn app_name() -> Result<String, AppError> {
     let locale = Locale::from_tag(&default_store()?.load_config()?.locale);
@@ -17,16 +28,19 @@ fn app_name() -> Result<String, AppError> {
 
 #[tauri::command]
 fn notes_list() -> Result<Vec<NoteMetadata>, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.list_notes()
 }
 
 #[tauri::command]
 fn notes_get(id: String) -> Result<Note, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.read_note(&id)
 }
 
 #[tauri::command]
 fn notes_create(app: AppHandle, request: SaveNoteRequest) -> Result<Note, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     let note = default_store()?.create_note(request)?;
     let _ = app.emit("notes-changed", ());
     Ok(note)
@@ -34,6 +48,7 @@ fn notes_create(app: AppHandle, request: SaveNoteRequest) -> Result<Note, AppErr
 
 #[tauri::command]
 fn notes_update(app: AppHandle, id: String, request: SaveNoteRequest) -> Result<Note, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     let note = default_store()?.update_note(&id, request)?;
     let _ = app.emit("notes-changed", ());
     Ok(note)
@@ -41,6 +56,7 @@ fn notes_update(app: AppHandle, id: String, request: SaveNoteRequest) -> Result<
 
 #[tauri::command]
 fn notes_delete(app: AppHandle, id: String) -> Result<(), AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.delete_note(&id)?;
     let _ = app.emit("notes-changed", ());
     Ok(())
@@ -52,6 +68,7 @@ fn notes_import_markdown(
     path: String,
     category: Option<String>,
 ) -> Result<Note, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     let note = default_store()?
         .import_markdown_file(&PathBuf::from(path), &category.unwrap_or_default())?;
     let _ = app.emit("notes-changed", ());
@@ -60,6 +77,7 @@ fn notes_import_markdown(
 
 #[tauri::command]
 fn notes_export_markdown(id: String, path: String) -> Result<(), AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.export_markdown_file(&id, &PathBuf::from(path))
 }
 
@@ -108,11 +126,13 @@ fn save_external_file(path: String, content: String) -> Result<(), AppError> {
 
 #[tauri::command]
 fn categories_list() -> Result<Vec<String>, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.list_categories()
 }
 
 #[tauri::command]
 fn categories_create(app: AppHandle, name: String) -> Result<(), AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.create_category(&name)?;
     let _ = app.emit("notes-changed", ());
     Ok(())
@@ -120,6 +140,7 @@ fn categories_create(app: AppHandle, name: String) -> Result<(), AppError> {
 
 #[tauri::command]
 fn categories_rename(app: AppHandle, old_name: String, new_name: String) -> Result<(), AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.rename_category(&old_name, &new_name)?;
     let _ = app.emit("notes-changed", ());
     Ok(())
@@ -127,6 +148,7 @@ fn categories_rename(app: AppHandle, old_name: String, new_name: String) -> Resu
 
 #[tauri::command]
 fn categories_delete(app: AppHandle, name: String) -> Result<(), AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.delete_category(&name)?;
     let _ = app.emit("notes-changed", ());
     Ok(())
@@ -138,6 +160,7 @@ fn notes_move_category(
     id: String,
     category: String,
 ) -> Result<NoteMetadata, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     let result = default_store()?.move_note_to_category(&id, &category)?;
     let _ = app.emit("notes-changed", ());
     Ok(result)
@@ -204,6 +227,7 @@ fn images_clean_unused(note_id: String, content: String) -> Result<Vec<String>, 
 
 #[tauri::command]
 fn config_get() -> Result<AppConfig, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     default_store()?.load_config()
 }
 
@@ -247,6 +271,7 @@ fn copy_background_image(_app: AppHandle, source_path: String) -> Result<String,
 
 #[tauri::command]
 fn config_save(app: AppHandle, config: AppConfig) -> Result<AppConfig, AppError> {
+    let _io = services::lark_sync::notes_guard()?;
     let store = default_store()?;
     let previous = store.load_config()?;
     desktop::apply_runtime_config(&app, &previous, &config).map_err(|error| {
@@ -269,6 +294,8 @@ fn config_save(app: AppHandle, config: AppConfig) -> Result<AppConfig, AppError>
 
 #[tauri::command]
 fn config_migrate_data_dir(app: AppHandle, new_data_dir: String) -> Result<AppConfig, AppError> {
+    let _sync = services::lark_sync::sync_guard()?;
+    let _io = services::lark_sync::notes_guard()?;
     let store = default_store()?;
     let new_path = PathBuf::from(&new_data_dir).join("floral");
     let new_store = store.migrate_data_to(&new_path)?;
@@ -447,7 +474,24 @@ pub fn run() {
             let _ = desktop::show_main_window(app);
         }))
         .setup(|app| {
+            // The LarkNote build must not silently adopt an existing Floral
+            // installation's notes/account settings. Explicit dev paths win.
+            if app.config().identifier == "com.larknote.floral.desktop" {
+                if env::var_os("FLORAL_NOTEPAPER_CONFIG_DIR").is_none() {
+                    if let Some(root) = dirs::config_dir() {
+                        env::set_var("FLORAL_NOTEPAPER_CONFIG_DIR", root.join("larknote"));
+                    }
+                }
+                if env::var_os("FLORAL_NOTEPAPER_DATA_DIR").is_none() {
+                    if let Some(root) = dirs::data_local_dir() {
+                        env::set_var("FLORAL_NOTEPAPER_DATA_DIR", root.join("larknote"));
+                    }
+                }
+            }
             if let Ok(store) = default_store() {
+                if app.config().identifier == "com.larknote.floral.desktop" {
+                    store.initialize_isolated_config()?;
+                }
                 let data = store.data_dir();
                 let scope = app.asset_protocol_scope();
                 let _ = scope.allow_directory(data.join("images"), true);
@@ -460,15 +504,28 @@ pub fn run() {
             app.manage(updater_state);
             // MSIX installs are updated by the Microsoft Store; the scheduler
             // must never drive in-app updates against a read-only package.
-            if !updater::platform::has_package_identity() {
+            if !updater::platform::has_package_identity()
+                && app.config().identifier != "com.larknote.floral.desktop"
+            {
                 updater::start_auto_check_scheduler(app.handle().clone());
             }
             desktop::setup_desktop(app)?;
+            lark_sync_commands::start(app.handle().clone());
             Ok(())
         })
-        .on_window_event(desktop::handle_window_event)
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let _ = services::lark_sync::mark_editor(window.label(), None);
+            }
+            desktop::handle_window_event(window, event);
+        })
         .invoke_handler(tauri::generate_handler![
             app_name,
+            lark_sync_commands::lark_sync_settings_get,
+            lark_sync_commands::lark_sync_settings_save,
+            lark_sync_commands::lark_sync_status,
+            lark_sync_commands::lark_sync_now,
+            lark_sync_commands::lark_sync_editor_state,
             notes_list,
             notes_get,
             notes_create,

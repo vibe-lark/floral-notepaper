@@ -197,6 +197,12 @@ pub async fn update_install(
     app: tauri::AppHandle,
     state: State<'_, UpdaterState>,
 ) -> Result<UpdateInstallResult, AppError> {
+    if app.config().identifier == "com.larknote.floral.desktop" {
+        return Err(crate::services::lark_sync::error(
+            "larknoteUpdate",
+            "此版本含飞书同步扩展，请从 LarkNote 源码构建更新；安装上游花笺会移除此扩展",
+        ));
+    }
     let task = state.begin_task(UpdateTaskKind::Install)?;
     let request_id = begin_install_prepare(&app, &state);
     if let Err(error) = wait_for_install_prepare(&app, &state, &request_id).await {

@@ -1,0 +1,9 @@
+[
+  { "name": "标题", "type": "text" },
+  { "name": "便签ID", "type": "text" },
+  { "name": "正文", "type": "text" },
+  { "name": "分类", "type": "text" },
+  { "name": "创建时间", "type": "datetime", "style": { "format": "yyyy-MM-dd HH:mm" } },
+  { "name": "修改时间", "type": "datetime", "style": { "format": "yyyy-MM-dd HH:mm" } },
+  { "name": "已删除", "type": "checkbox" }
+]

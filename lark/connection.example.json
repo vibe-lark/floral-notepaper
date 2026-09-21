@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "baseToken": "REPLACE_WITH_BASE_TOKEN",
+  "tableId": "tblREPLACE",
+  "profile": "",
+  "cliPath": "lark-cli",
+  "intervalSeconds": 60
+}

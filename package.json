@@ -11,6 +11,13 @@
     "fmt": "oxfmt",
     "preview": "vite preview",
     "tauri": "tauri",
+    "dev:lark": "node scripts/dev-lark.mjs",
+    "build:lark": "tauri build --config src-tauri/tauri.larknote.conf.json",
+    "build:mac": "node scripts/build-macos.mjs",
+    "test:sync": "cargo test --manifest-path tools/sync-check/Cargo.toml -- --test-threads=1",
+    "sync:check": "cargo run --manifest-path tools/sync-check/Cargo.toml -- check lark/connection.local.json",
+    "sync:once": "cargo run --manifest-path tools/sync-check/Cargo.toml -- sync lark/connection.local.json",
+    "test:sync:live": "cargo run --manifest-path tools/sync-check/Cargo.toml -- verify-live lark/connection.local.json .local/live-regression",
     "version:sync": "node scripts/set-version.mjs",
     "prepare": "husky"
   },

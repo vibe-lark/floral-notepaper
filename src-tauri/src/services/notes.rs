@@ -201,12 +201,6 @@ impl From<serde_json::Error> for AppError {
     }
 }
 
-impl From<tauri::Error> for AppError {
-    fn from(error: tauri::Error) -> Self {
-        Self::new("tauri", error.to_string())
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct MetadataFile {
@@ -322,7 +316,13 @@ fn data_dir_from_notes_dir(notes_dir: &str) -> PathBuf {
     path.to_path_buf()
 }
 
-const DATA_DIR_ITEMS: [&str; 4] = ["metadata.json", "notes", "images", "backgrounds"];
+const DATA_DIR_ITEMS: [&str; 5] = [
+    "metadata.json",
+    "notes",
+    "images",
+    "backgrounds",
+    ".lark-sync",
+];
 
 // 旧版无论 notesDir 指向哪里，metadata.json、images、backgrounds 都固定存放在旧主目录；
 // 数据目录解析到其他位置时必须一并带走，否则笔记内图片引用全部失效、created_at 丢失
@@ -699,6 +699,15 @@ impl NoteStore {
         self.config_dir.join(MACOS_SHORTCUT_MIGRATION_MARKER)
     }
 
+    /// Opt-in used only by the separately identified LarkNote build. Do not
+    /// migrate the original app's legacy storage into this new installation.
+    pub fn initialize_isolated_config(&self) -> Result<(), AppError> {
+        if !self.config_path().exists() {
+            write_json_atomic(&self.config_path(), &self.default_config())?;
+        }
+        Ok(())
+    }
+
     pub fn load_config(&self) -> Result<AppConfig, AppError> {
         self.ensure_config_dir()?;
         let path = self.config_path();
@@ -802,6 +811,73 @@ impl NoteStore {
             word_count,
             content: request.content,
         })
+    }
+
+    /// Import a cloud revision without changing its stable ID. The caller holds
+    /// the same note I/O lock as desktop edits. Cloud paths are never trusted.
+    pub fn apply_synced_note(&self, remote: &super::lark_sync::SyncNote) -> Result<(), AppError> {
+        remote.validate()?;
+        self.ensure_storage()?;
+        let mut metadata = self.load_metadata()?;
+        let old = metadata.notes.iter().find(|n| n.id == remote.id).cloned();
+        if let Some(old) = &old {
+            let old_path = self.note_path_in_category(&old.file_name, &old.category);
+            if old_path.exists() {
+                let archive = self.data_dir.join(".lark-sync").join("backups");
+                fs::create_dir_all(&archive)?;
+                fs::copy(
+                    &old_path,
+                    archive.join(format!("{}-{}.md", old.id, Uuid::new_v4())),
+                )?;
+            }
+        }
+        metadata.notes.retain(|n| n.id != remote.id);
+        if !remote.deleted {
+            let mut file_name = self.file_name_for(&remote.id, &remote.title);
+            if file_name.len() > 240 {
+                file_name = format!("{}.md", remote.id);
+            }
+            let path = self.note_path_in_category(&file_name, &remote.category);
+            fs::create_dir_all(path.parent().expect("note parent"))?;
+            if !fs::canonicalize(path.parent().expect("note parent"))?
+                .starts_with(fs::canonicalize(self.notes_dir())?)
+            {
+                return Err(AppError::new(
+                    "syncUnsafePath",
+                    "分类目录是指向便签目录之外的链接，已拒绝云端写入",
+                ));
+            }
+            // Keep the old file intact until the replacement is durable.
+            let temp = path.with_extension("sync-tmp");
+            fs::write(&temp, &remote.content)?;
+            fs::File::open(&temp)?.sync_all()?;
+            fs::rename(temp, &path)?;
+            metadata.notes.push(NoteMetadata {
+                id: remote.id.clone(),
+                title: remote.title.clone(),
+                file_name,
+                category: remote.category.clone(),
+                created_at: remote.created_at,
+                updated_at: remote.updated_at,
+                word_count: count_words(&remote.content),
+                preview: preview(&remote.content),
+            });
+        }
+        self.save_metadata(&metadata)?;
+        if let Some(old) = old {
+            let path = self.note_path_in_category(&old.file_name, &old.category);
+            let still_used = metadata.notes.iter().any(|n| {
+                paths_refer_to_same_entry(
+                    &path,
+                    &self.note_path_in_category(&n.file_name, &n.category),
+                )
+            });
+            if !still_used && path.exists() {
+                // A durable backup was made above; images remain local.
+                fs::remove_file(path)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn update_note(&self, id: &str, request: SaveNoteRequest) -> Result<Note, AppError> {
@@ -1286,11 +1362,23 @@ impl NoteStore {
         let _config = self.load_config()?;
         fs::create_dir_all(self.notes_dir())?;
         if !self.metadata_path().exists() {
+            if self.data_dir.join(".lark-sync/state.json").exists() {
+                return Err(AppError::new(
+                    "syncMetadata",
+                    "同步便签的元数据缺失，请恢复备份，不会自动重建同步ID",
+                ));
+            }
             let metadata = self.rebuild_metadata()?;
             self.save_metadata(&metadata)?;
         } else {
             let metadata = self.load_metadata()?;
             if metadata.notes.is_empty() && self.notes_dir_has_md_files() {
+                if self.data_dir.join(".lark-sync/state.json").exists() {
+                    return Err(AppError::new(
+                        "syncMetadata",
+                        "同步元数据与本地文件不一致，请恢复备份",
+                    ));
+                }
                 let rebuilt = self.rebuild_metadata()?;
                 self.save_metadata(&rebuilt)?;
             }
@@ -1332,6 +1420,12 @@ impl NoteStore {
         self.ensure_data_dir()?;
         let path = self.metadata_path();
         if !path.exists() {
+            if self.data_dir.join(".lark-sync/state.json").exists() {
+                return Err(AppError::new(
+                    "syncMetadata",
+                    "同步便签的元数据缺失，请恢复备份",
+                ));
+            }
             let rebuilt = self.rebuild_metadata()?;
             self.save_metadata(&rebuilt)?;
             return Ok(rebuilt);
@@ -1340,6 +1434,12 @@ impl NoteStore {
         match serde_json::from_str(&fs::read_to_string(&path)?) {
             Ok(metadata) => Ok(metadata),
             Err(_) => {
+                if self.data_dir.join(".lark-sync/state.json").exists() {
+                    return Err(AppError::new(
+                        "syncMetadata",
+                        "同步便签的元数据损坏，请恢复备份，不会自动重建同步ID",
+                    ));
+                }
                 // 备份损坏文件再重建：rebuild 从文件系统推断 created_at / 分类，
                 // 与原始数据可能不一致，保留原件供事后取证分析
                 let corrupt_name = format!(
