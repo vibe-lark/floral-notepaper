@@ -8,7 +8,7 @@
 
 本地已通过118项测试、TypeScript、lint、工作流 YAML 解析及脚本语法检查。`npm run build:mac` 在 Linux 上按预期拒绝执行；这不代表 Mac 原生编译或安装验收已通过。
 
-同步扩展仓库为 [yannisxu/floral-notepaper](https://github.com/yannisxu/floral-notepaper)，基于原作者 `Achilng/floral-notepaper`。Mac 工作流 `.github/workflows/larknote-macos-preview.yml` 仅手动触发，上传代码不会自动打包或发布 Release。
+同步扩展仓库为 [vibe-lark/floral-notepaper](https://github.com/vibe-lark/floral-notepaper)，基于原作者 `Achilng/floral-notepaper`。Mac 工作流 `.github/workflows/larknote-macos-preview.yml` 仅手动触发，上传代码不会自动打包或发布 Release。
 
 ## 安装包生成方式
 
