@@ -4,6 +4,12 @@ import { spawnSync } from "node:child_process";
 import { buildArgs, previewEnvironment, selectTarget } from "../scripts/build-macos.mjs";
 
 describe("Mac preview packaging", () => {
+  test("keeps runner-dependent paths inside a step where the context is available", () => {
+    const workflow = readFileSync(".github/workflows/larknote-macos-preview.yml", "utf8");
+    const jobConfiguration = workflow.split("    steps:")[0];
+    expect(jobConfiguration).not.toContain("${{ runner.");
+    expect(workflow).toContain("FLORAL_NOTEPAPER_TEST_TEMP_DIR: ${{ runner.temp }}/larknote-tests");
+  });
   test("selects Apple Silicon or Intel and supports an explicit universal build", () => {
     expect(selectTarget([], "arm64")).toBe("aarch64-apple-darwin");
     expect(selectTarget([], "x64")).toBe("x86_64-apple-darwin");

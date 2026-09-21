@@ -21,10 +21,6 @@ jobs:
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    env:
-      FLORAL_NOTEPAPER_CONFIG_DIR: ${{ runner.temp }}/larknote-config
-      FLORAL_NOTEPAPER_DATA_DIR: ${{ runner.temp }}/larknote-data
-      FLORAL_NOTEPAPER_TEST_TEMP_DIR: ${{ runner.temp }}/larknote-tests
     steps:
       - uses: actions/checkout@v5
         with:
@@ -44,6 +40,10 @@ jobs:
       - name: Frontend and packaging tests
         run: npm test
       - name: Compile and test native integration
+        env:
+          FLORAL_NOTEPAPER_CONFIG_DIR: ${{ runner.temp }}/larknote-config
+          FLORAL_NOTEPAPER_DATA_DIR: ${{ runner.temp }}/larknote-data
+          FLORAL_NOTEPAPER_TEST_TEMP_DIR: ${{ runner.temp }}/larknote-tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib -- --test-threads=1
       - name: Build and verify Mac installer
         env:

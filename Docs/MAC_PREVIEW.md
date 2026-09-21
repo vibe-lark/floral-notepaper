@@ -6,7 +6,7 @@
 
 本工作区运行于 Linux x86_64，没有 Xcode/macOS SDK，也没有已连接的 Mac 构建机。**目前尚未生成 Mac 安装包**；已有的是打包脚本和可手动触发的 macOS CI 流程。不要下载上游原版 DMG 来验证飞书同步，上游包不包含本分支改动。
 
-本地已通过118项测试、TypeScript、lint、工作流 YAML 解析及脚本语法检查。`npm run build:mac` 在 Linux 上按预期拒绝执行；这不代表 Mac 原生编译或安装验收已通过。
+本地已通过119项测试、TypeScript、lint、工作流 YAML 解析及脚本语法检查。`npm run build:mac` 在 Linux 上按预期拒绝执行；这不代表 Mac 原生编译或安装验收已通过。
 
 同步扩展仓库为 [vibe-lark/floral-notepaper](https://github.com/vibe-lark/floral-notepaper)，基于原作者 `Achilng/floral-notepaper`。Mac 工作流 `.github/workflows/larknote-macos-preview.yml` 仅手动触发，上传代码不会自动打包或发布 Release。
 
