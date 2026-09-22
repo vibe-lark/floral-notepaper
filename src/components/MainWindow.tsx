@@ -49,6 +49,8 @@ import type {
 import { BackgroundLayer } from "./BackgroundLayer";
 import { SyncBadge } from "../features/sync/SyncSettingsSection";
 import { useSyncEditor } from "../features/sync/useSyncStatus";
+import { syncNow } from "../features/sync/api";
+import { useAppShortcuts } from "../features/shortcuts/useAppShortcuts";
 import { POPUP_VIEWPORT_MARGIN, useViewportPopupPosition } from "./popupPosition";
 import { SlidingButtonGroup } from "./SlidingButtonGroup";
 import {
@@ -353,6 +355,7 @@ export function MainWindow({
   const [externalFiles, setExternalFiles] = useState<ExternalFile[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [viewMode, setViewMode] = useState<ViewMode>(
     normalizeViewMode(initialConfig?.defaultViewMode ?? "split"),
   );
@@ -454,7 +457,10 @@ export function MainWindow({
     [notes, selectedId],
   );
   const selectedNoteRef = useRef(selectedNote);
-  useSyncEditor(selectedNote?.id ?? null, saveState === "dirty" || saveState === "saving");
+  useSyncEditor(
+    selectedNote?.id ?? null,
+    saveState === "dirty" || saveState === "saving" || saveState === "error",
+  );
   selectedNoteRef.current = selectedNote;
 
   const selectedExternalFile = useMemo(
@@ -1129,7 +1135,8 @@ export function MainWindow({
   const performSave = useCallback(
     async (force: boolean): Promise<boolean> => {
       // 非强制保存（自动保存、切换前保存）在没有未保存修改时直接视为成功
-      if (!force && saveStateRef.current !== "dirty") return true;
+      if (!force && saveStateRef.current !== "dirty" && saveStateRef.current !== "error")
+        return true;
       const id = selectedIdRef.current;
       if (!id) return false;
 
@@ -1229,18 +1236,6 @@ export function MainWindow({
   }, [saveCurrentNote, t]);
 
   useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key === "s") {
-        event.preventDefault();
-        void saveCurrentNote(true);
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [saveCurrentNote]);
-
-  useEffect(() => {
     if (!selectedId || saveState !== "dirty") return undefined;
     if (isExternal) {
       if (!settingsConfig?.externalFileAutoSave) return undefined;
@@ -1266,7 +1261,7 @@ export function MainWindow({
   ]);
 
   const handleNewNote = async () => {
-    await saveCurrentNote();
+    if (!(await saveCurrentNote()) || saveStateRef.current === "dirty") return;
     try {
       const note = await createNote({ title: "", content: "", category: activeCategory });
       replaceNoteMetadata(note);
@@ -1679,6 +1674,38 @@ export function MainWindow({
       showToast(getErrorMessage(error));
     }
   };
+
+  useAppShortcuts(
+    {
+      new: handleNewNote,
+      save: () => saveCurrentNote(true),
+      search: () => {
+        setSidebarCollapsed(false);
+        requestAnimationFrame(() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        });
+      },
+      import: handleImportNote,
+      export: () => (selectedNote ? handleExportNote(selectedNote) : undefined),
+      settings: async () => {
+        if (!settingsOpen) await handleOpenSettings();
+      },
+      edit: () => setViewMode("edit"),
+      split: () => setViewMode("split"),
+      preview: () => setViewMode("preview"),
+      quickNote: handleOpenNotepad,
+      sync: async () => {
+        if (!(await saveCurrentNote()) || saveStateRef.current === "dirty") return;
+        showToast((await syncNow()).message);
+      },
+      close: async () => {
+        if (!(await saveCurrentNote()) || saveStateRef.current === "dirty") return;
+        await closeCurrentWindow();
+      },
+    },
+    (error) => showToast(getErrorMessage(error)),
+  );
 
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -2184,6 +2211,7 @@ export function MainWindow({
                   </svg>
                   <input
                     type="text"
+                    ref={searchInputRef}
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder={t("main.sidebar.searchPlaceholder", { defaultValue: "搜索笔记…" })}

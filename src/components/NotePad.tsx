@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSyncEditor } from "../features/sync/useSyncStatus";
+import { useAppShortcuts } from "../features/shortcuts/useAppShortcuts";
 import type { MouseEvent } from "react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -587,18 +588,6 @@ export function NotePad({
     [clearPendingTileDrag, switchSurfaceMode, tileDoubleClickToEdit],
   );
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.ctrlKey || event.metaKey) && event.key === "s") {
-        event.preventDefault();
-        void handleSaveRef.current();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
   const handleOpenNote = async (noteId: string) => {
     try {
       const note = await getNote(noteId);
@@ -736,6 +725,37 @@ export function NotePad({
     setMode("new");
     setStatus("empty");
   };
+
+  const saveBeforeLeaving = async () => {
+    const beforeTitle = titleValueRef.current;
+    const beforeContent = contentValueRef.current;
+    if (
+      statusRef.current === "dirty" ||
+      statusRef.current === "saveFailed" ||
+      (!editingNoteIdRef.current && hasDraftContent())
+    ) {
+      await saveNoteRef.current();
+    }
+    return titleValueRef.current === beforeTitle && contentValueRef.current === beforeContent;
+  };
+  useAppShortcuts(
+    {
+      save: () => handleSaveRef.current(),
+      new: async () => {
+        if (await saveBeforeLeaving()) {
+          resetDraft();
+          titleRef.current?.focus();
+        }
+      },
+      import: async () => {
+        if (await saveBeforeLeaving()) setMode("open");
+      },
+      close: async () => {
+        if (await saveBeforeLeaving()) handleCloseRef.current();
+      },
+    },
+    (error) => showToast(getErrorMessage(error)),
+  );
 
   const isTile = surfaceMode === "tile";
   const tileTitle = title.trim();

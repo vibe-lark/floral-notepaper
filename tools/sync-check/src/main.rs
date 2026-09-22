@@ -1,6 +1,7 @@
 use larknote_sync_check::{
     json_io::write_json_atomic,
     services::{
+        lark_connection,
         lark_sync::{self, CliRemote, Remote, SyncSettings},
         notes::{NoteStore, SaveNoteRequest},
     },
@@ -28,6 +29,23 @@ fn isolated_store(root: &Path) -> Result<NoteStore, Box<dyn std::error::Error>> 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let mode = args.get(1).map(String::as_str).unwrap_or("help");
+    if mode == "resolve-link" {
+        let link = args.get(2).ok_or("A Base URL is required")?;
+        let root = PathBuf::from(
+            args.get(3)
+                .map(String::as_str)
+                .unwrap_or(".local/link-check"),
+        );
+        fs::create_dir_all(&root)?;
+        let store = isolated_store(&fs::canonicalize(root)?)?;
+        let resolved = lark_connection::resolve_link(&store, link)?;
+        println!(
+            "{}",
+            json!({"ok":true,"url":resolved.base_url,"baseToken":resolved.base_token,
+            "tableId":resolved.table_id,"cliDetected":true,"schemaVerified":true,"remoteWrites":false})
+        );
+        return Ok(());
+    }
     if !["check", "sync", "verify-live"].contains(&mode) {
         println!("Usage: larknote-sync-check <check|sync|verify-live> <connection.json> [isolated-root]\nverify-live creates test notes and soft-deletes its own test notes at completion; it never deletes Base rows.");
         return Ok(());

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { getConfig } from "../features/settings/api";
+import { shortcutPlatform } from "../features/settings/shortcutRecorder";
 import type { AppConfig } from "../features/settings/types";
 import { requestSurfaceAction } from "../features/windows/surfaceActions";
 import { getTileContextMenuItems } from "../features/windows/tileContextMenu";
@@ -19,6 +20,7 @@ const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.proto
 const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
 
 export function ContextMenuProvider({ children }: { children: React.ReactNode }) {
+  const primaryKey = shortcutPlatform() === "mac" ? "⌘" : "Ctrl+";
   const { t } = useTranslation();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [menuClosing, setMenuClosing] = useState(false);
@@ -187,32 +189,32 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
           : [
               {
                 label: t("contextMenu.edit.cut", { defaultValue: "剪切" }),
-                shortcut: "Ctrl+X",
+                shortcut: `${primaryKey}X`,
                 action: () => runCommand("cut"),
                 disabled: !menu.hasSelection,
               },
               {
                 label: t("contextMenu.edit.copy", { defaultValue: "复制" }),
-                shortcut: "Ctrl+C",
+                shortcut: `${primaryKey}C`,
                 action: () => runCommand("copy"),
                 disabled: !menu.hasSelection,
               },
               {
                 label: t("contextMenu.edit.paste", { defaultValue: "粘贴" }),
-                shortcut: "Ctrl+V",
+                shortcut: `${primaryKey}V`,
                 action: () => runCommand("paste"),
                 disabled: false,
               },
               { separator: true as const },
               {
                 label: t("contextMenu.edit.selectAll", { defaultValue: "全选" }),
-                shortcut: "Ctrl+A",
+                shortcut: `${primaryKey}A`,
                 action: () => runCommand("selectAll"),
                 disabled: false,
               },
             ]
         : [],
-    [menu, runCommand, t, tileContextMenuItems],
+    [menu, runCommand, t, tileContextMenuItems, primaryKey],
   );
 
   return (

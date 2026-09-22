@@ -1,41 +1,39 @@
 import { useEffect, useState } from "react";
 import { getErrorMessage } from "../notes/api";
 import {
-  DEFAULT_SYNC_SETTINGS,
-  getSyncSettings,
-  saveSyncSettings,
+  connectSync,
+  disconnectSync,
+  getSyncConnection,
   syncNow,
   syncStatusLabel,
-  type SyncSettings,
+  type SyncConnection,
   type SyncStatus,
 } from "./api";
 import { useSyncStatus } from "./useSyncStatus";
 
-const inputClass =
-  "w-full h-8 px-2.5 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[11px] text-ink-soft focus:outline-none focus:border-bamboo";
 const buttonClass =
   "h-8 px-3 rounded-lg border border-paper-deep/45 text-[11px] text-ink-soft hover:text-bamboo hover:bg-bamboo-mist/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors";
 
 export function SyncSettingsSection({
-  initialSettings,
+  initialConnection,
   initialStatus,
 }: {
-  initialSettings?: SyncSettings;
+  initialConnection?: SyncConnection;
   initialStatus?: SyncStatus;
 }) {
-  const [settings, setSettings] = useState(initialSettings ?? DEFAULT_SYNC_SETTINGS);
-  const [saved, setSaved] = useState(initialSettings ?? DEFAULT_SYNC_SETTINGS);
-  const [loading, setLoading] = useState(!initialSettings);
+  const [saved, setSaved] = useState(initialConnection ?? { url: "", enabled: false });
+  const [url, setUrl] = useState(initialConnection?.url ?? "");
+  const [loading, setLoading] = useState(!initialConnection);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const status = useSyncStatus(initialStatus);
   useEffect(() => {
     let active = true;
-    void getSyncSettings()
+    void getSyncConnection()
       .then((value) => {
         if (active) {
-          setSettings(value);
           setSaved(value);
+          setUrl(value.url);
         }
       })
       .catch((error) => {
@@ -48,34 +46,39 @@ export function SyncSettingsSection({
       active = false;
     };
   }, []);
-  const changed = JSON.stringify(settings) !== JSON.stringify(saved);
-  const working = busy || status.phase === "syncing" || loading;
-  const set = <K extends keyof SyncSettings>(key: K, value: SyncSettings[K]) =>
-    setSettings((s) => ({ ...s, [key]: value }));
-
-  async function save() {
+  const changed = url.trim() !== saved.url;
+  const working = busy || loading || status.phase === "syncing";
+  async function connect() {
+    if (working || !url.trim()) return;
     setBusy(true);
     setMessage("");
     try {
-      const value = await saveSyncSettings(settings);
+      const value = await connectSync(url.trim());
       setSaved(value);
-      setSettings(value);
-      setMessage(
-        value.enabled
-          ? "连接校验通过，设置已保存。点击立即同步开始。"
-          : "已暂停同步，本地和云端便签均保留。",
-      );
+      setUrl(value.url);
+      setMessage("连接已保存，正在首次同步…");
+      try {
+        setMessage((await syncNow()).message);
+      } catch (error) {
+        setMessage(`连接已保存；同步未完成：${getErrorMessage(error)}`);
+      }
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setBusy(false);
     }
   }
-  async function run() {
+  async function run(pause = false) {
+    if (working) return;
     setBusy(true);
     setMessage("");
     try {
-      setMessage((await syncNow()).message);
+      if (pause) {
+        setSaved(await disconnectSync());
+        setMessage("已暂停同步，本地和云端便签均保留。");
+      } else {
+        setMessage((await syncNow()).message);
+      }
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -87,85 +90,40 @@ export function SyncSettingsSection({
       aria-label="飞书多维表格同步"
       className="space-y-3 rounded-xl border border-bamboo/20 bg-bamboo-mist/20 p-3"
     >
-      <div className="flex items-center justify-between">
-        <h3 className="text-[13px] font-display text-ink-soft">飞书多维表格同步</h3>
-        <span className="text-[10px] text-bamboo">LarkNote</span>
-      </div>
+      <h3 className="text-[13px] font-display text-ink-soft">飞书多维表格同步</h3>
       <p className="text-[11px] leading-relaxed text-ink-faint">
-        保留花笺的编辑、小窗与磁贴。多维表格保存云端便签，本地保留离线副本。
+        只需粘贴一个链接。自动识别数据表，使用这台电脑已有的飞书登录。
       </p>
-      <fieldset disabled={working} className="space-y-2 disabled:opacity-60">
-        <label className="flex items-start gap-2 text-[11px] text-ink-soft leading-relaxed">
-          <input
-            type="checkbox"
-            checked={settings.enabled}
-            onChange={(e) => set("enabled", e.target.checked)}
-            className="mt-0.5 accent-bamboo"
-          />
-          启用双向同步，将当前数据目录中的便签同步到指定表
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void connect();
+        }}
+        className="space-y-2"
+      >
+        <label className="block text-[11px] text-ink-faint" htmlFor="lark-base-link">
+          多维表格链接
         </label>
-        <label className="block text-[11px] text-ink-faint">
-          Base token
-          <input
-            className={inputClass}
-            autoComplete="off"
-            value={settings.baseToken}
-            onChange={(e) => set("baseToken", e.target.value.trim())}
-            placeholder="多维表格链接 /base/ 后的 token"
-          />
-        </label>
-        <label className="block text-[11px] text-ink-faint">
-          数据表 ID
-          <input
-            className={inputClass}
-            autoComplete="off"
-            value={settings.tableId}
-            onChange={(e) => set("tableId", e.target.value.trim())}
-            placeholder="tbl…"
-          />
-        </label>
-        <details className="text-[11px] text-ink-faint">
-          <summary className="cursor-pointer py-1">账号与同步选项</summary>
-          <div className="space-y-2 pt-2">
-            <label className="block">
-              Lark CLI 路径
-              <input
-                className={inputClass}
-                value={settings.cliPath}
-                onChange={(e) => set("cliPath", e.target.value)}
-              />
-            </label>
-            <label className="block">
-              CLI profile（留空使用当前默认账号）
-              <input
-                className={inputClass}
-                value={settings.profile}
-                onChange={(e) => set("profile", e.target.value.trim())}
-              />
-            </label>
-            <label className="block">
-              自动同步间隔（秒）
-              <input
-                type="number"
-                min={30}
-                max={3600}
-                className={inputClass}
-                value={settings.intervalSeconds}
-                onChange={(e) => set("intervalSeconds", Number(e.target.value))}
-              />
-            </label>
-          </div>
-        </details>
-      </fieldset>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className={buttonClass}
+        <input
+          id="lark-base-link"
+          type="url"
+          required
+          autoComplete="off"
+          spellCheck={false}
           disabled={working}
-          onClick={() => void save()}
-        >
-          保存并校验
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="https://…/base/…?table=…"
+          className="w-full h-9 px-2.5 rounded-lg bg-paper-warm/70 border border-paper-deep/40 text-[12px] text-ink-soft focus:outline-none focus:border-bamboo"
+        />
+        <p className="text-[10px] leading-relaxed text-ink-faint">
+          连接后，当前数据目录中的便签会双向同步到这张表，默认每 60 秒一次。
+        </p>
+        <button type="submit" className={buttonClass} disabled={working || !url.trim()}>
+          {busy ? "处理中…" : "连接并同步"}
         </button>
+      </form>
+      <div className="flex gap-2">
         <button
           type="button"
           className={buttonClass}
@@ -174,9 +132,24 @@ export function SyncSettingsSection({
         >
           {status.phase === "syncing" ? "正在同步…" : "立即同步"}
         </button>
+        {saved.enabled && (
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={working}
+            onClick={() => void run(true)}
+          >
+            暂停同步
+          </button>
+        )}
       </div>
+      {saved.enabled && !saved.url && (
+        <p className="text-[10px] text-ink-faint">
+          已保留原有连接，仍可同步；修改连接时只需粘贴链接。
+        </p>
+      )}
       {changed && (
-        <p className="text-[10px] text-ink-faint">设置尚未保存；立即同步仅使用已保存配置。</p>
+        <p className="text-[10px] text-ink-faint">链接尚未保存，点击“连接并同步”后生效。</p>
       )}
       <div
         role="status"
@@ -197,8 +170,8 @@ export function SyncSettingsSection({
         )}
       </div>
       <p className="text-[10px] leading-relaxed text-ink-faint">
-        使用当前飞书用户身份，不保存密码或 access
-        token。适合个人多设备同步；表的分享权限由飞书控制。删除请使用“已删除”复选框；空分类、窗口布局、图片附件不跨设备同步。
+        首次使用需在本机安装并登录 Lark
+        CLI，程序会自动查找，无需填写路径或凭证。删除请使用表里的“已删除”复选框；图片附件不跨设备同步。
       </p>
     </section>
   );
@@ -210,7 +183,7 @@ export function SyncBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
     <button
       type="button"
       onClick={onOpenSettings}
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
       className="px-2 py-1 rounded-md text-[10px] text-bamboo hover:bg-bamboo-mist/60 max-w-[170px] truncate"
       title={status.error || "打开飞书同步设置"}
     >

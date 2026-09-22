@@ -55,9 +55,18 @@ npm run sync:once   # 同步 .local/headless/device-a/data 下的便签
      --fields @lark/fields.json --time-zone Asia/Shanghai --as user
    ```
 
-3. 复制命令真实返回的 Base token、表 ID 到应用设置，或按模板创建 `lark/connection.local.json`。已有链接先用 `lark-cli base +url-resolve --url '<链接>' --as user` 解析，不能把 wiki token 当作 Base token。
-4. 在应用设置勾选“启用双向同步”，确认上传范围是**当前数据目录内所有便签**，点击“保存并校验” → “立即同步”。默认自动同步间隔 60 秒，可设置 30–3600 秒；最小化到托盘后仍同步，退出进程后停止。
-5. 另一台电脑配置同一张表，用有访问权限的用户身份登录，启用同步即可拉取。
+3. 打开便签数据表，复制浏览器里的完整 HTTPS 链接。在应用“设置 → 飞书多维表格同步”里只填写这一个链接。支持 `/base/` 和 `/wiki/` 链接；无需手填 Base token、数据表 ID、CLI 路径、profile 或同步间隔。
+4. 点击“连接并同步”：程序调用 `lark-cli base +url-resolve` 解析链接、检查便签字段，然后保存连接并开始同步。上传范围是**当前数据目录内所有便签**，默认每 60 秒同步；可用“暂停同步”停止，不删除两端数据。CLI 会从 PATH、用户安装目录及 Homebrew 常用目录自动查找；首次仍需在这台电脑安装并登录 CLI。
+5. 多张表的 Base 必须打开便签所在的表，再复制包含 `table=` 的完整链接，程序不会默认选第一张表。只有一张表时也可粘贴 Base 本身的链接。
+6. 另一台电脑粘贴同一个链接，用有访问权限的用户身份登录即可。原来保存的 Base token/表 ID 配置继续有效，重新连接后自动保存完整链接；机器专用配置与真实链接不提交公开仓库。
+
+只读验证链接解析和自动查找（不会写云端记录）：
+
+```bash
+cargo run --manifest-path tools/sync-check/Cargo.toml -- resolve-link '<多维表格完整链接>'
+```
+
+Mac 常用快捷键见 [Mac 体验说明](MAC_PREVIEW.md#mac-快捷键)，也可在应用设置里展开“常用快捷键”。
 
 | 字段                | 类型     | 用途                                         |
 | ------------------- | -------- | -------------------------------------------- |

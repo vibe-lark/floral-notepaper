@@ -1,4 +1,5 @@
 use crate::services::{
+    lark_connection::{self, SyncConnection},
     lark_sync::{self, SyncReport, SyncSettings},
     notes::{default_store, AppError},
 };
@@ -19,6 +20,40 @@ pub struct SyncStatus {
 }
 static STATUS: LazyLock<Mutex<SyncStatus>> = LazyLock::new(|| Mutex::new(SyncStatus::default()));
 static RUNNING: Mutex<()> = Mutex::new(());
+
+#[tauri::command]
+pub fn lark_sync_connection_get() -> Result<SyncConnection, AppError> {
+    lark_connection::connection(&default_store()?)
+}
+
+#[tauri::command]
+pub async fn lark_sync_connect(app: AppHandle, url: String) -> Result<SyncConnection, AppError> {
+    let connection = tauri::async_runtime::spawn_blocking(move || {
+        lark_connection::connect(&default_store()?, &url)
+    })
+    .await
+    .map_err(|_| lark_sync::error("syncWorker", "连接飞书失败"))??;
+    let mut status = lark_sync_status()?;
+    status.phase = "idle".into();
+    status.error = None;
+    publish(&app, status);
+    Ok(connection)
+}
+
+#[tauri::command]
+pub async fn lark_sync_disconnect(app: AppHandle) -> Result<SyncConnection, AppError> {
+    let connection =
+        tauri::async_runtime::spawn_blocking(
+            move || lark_connection::disconnect(&default_store()?),
+        )
+        .await
+        .map_err(|_| lark_sync::error("syncWorker", "暂停同步失败"))??;
+    let mut status = lark_sync_status()?;
+    status.phase = "idle".into();
+    status.error = None;
+    publish(&app, status);
+    Ok(connection)
+}
 
 #[tauri::command]
 pub fn lark_sync_editor_state(

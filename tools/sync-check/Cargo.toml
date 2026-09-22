@@ -12,6 +12,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 sha2 = "0.10"
 dirs = "6"
 trash = "5"
+url = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

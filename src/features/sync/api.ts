@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export interface SyncConnection {
+  url: string;
+  enabled: boolean;
+}
+export const getSyncConnection = () => invoke<SyncConnection>("lark_sync_connection_get");
+export const connectSync = (url: string) => invoke<SyncConnection>("lark_sync_connect", { url });
+export const disconnectSync = () => invoke<SyncConnection>("lark_sync_disconnect");
+
 export interface SyncSettings {
   enabled: boolean;
   baseToken: string;

@@ -17,7 +17,7 @@ async function seed(name, value) {
   }
 }
 await seed("config.json", {
-  globalShortcut: "Ctrl+Space",
+  globalShortcut: process.platform === "darwin" ? "Command+Option+N" : "Ctrl+Space",
   closeToTray: true,
   autostart: false,
   defaultViewMode: "split",

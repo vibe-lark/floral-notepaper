@@ -58,6 +58,7 @@ pub fn notes_guard() -> Result<MutexGuard<'static, ()>, AppError> {
 #[serde(rename_all = "camelCase", default)]
 pub struct SyncSettings {
     pub enabled: bool,
+    pub base_url: String,
     pub base_token: String,
     pub table_id: String,
     pub profile: String,
@@ -69,6 +70,7 @@ impl Default for SyncSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            base_url: String::new(),
             base_token: String::new(),
             table_id: String::new(),
             profile: String::new(),
@@ -519,98 +521,21 @@ impl CliRemote {
     }
 
     fn call(&self, action: &str, extra: &[String]) -> Result<Value, AppError> {
-        let mut command = Command::new(&self.settings.cli_path);
-        if !self.settings.profile.is_empty() {
-            command.args(["--profile", &self.settings.profile]);
-        }
-        command
-            .args([
-                "base",
-                action,
-                "--base-token",
-                &self.settings.base_token,
-                "--table-id",
-                &self.settings.table_id,
-                "--as",
-                "user",
-                "--format",
-                "json",
-            ])
-            .args(extra)
-            .current_dir(&self.work_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("LARKSUITE_CLI_NO_UPDATE_NOTIFIER", "1")
-            .env("LARKSUITE_CLI_NO_SKILLS_NOTIFIER", "1");
+        let mut args = vec![
+            "base".into(),
+            action.into(),
+            "--base-token".into(),
+            self.settings.base_token.clone(),
+            "--table-id".into(),
+            self.settings.table_id.clone(),
+        ];
+        args.extend_from_slice(extra);
         if action == "+record-list" || action == "+record-get" {
             for (name, _) in FIELDS {
-                command.args(["--field-id", name]);
+                args.extend(["--field-id".into(), name.into()]);
             }
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
-        let mut child = command.spawn().map_err(|_| {
-            error(
-                "syncCliMissing",
-                "无法启动 Lark CLI；请安装并在设置中填写可执行文件路径",
-            )
-        })?;
-        let mut stdout = child.stdout.take().expect("piped stdout");
-        let mut stderr = child.stderr.take().expect("piped stderr");
-        let output = thread::spawn(move || {
-            let mut b = Vec::new();
-            stdout.read_to_end(&mut b).map(|_| b)
-        });
-        let errors = thread::spawn(move || {
-            let mut b = Vec::new();
-            stderr.read_to_end(&mut b).map(|_| b)
-        });
-        let started = Instant::now();
-        let status = loop {
-            if let Some(status) = child.try_wait()? {
-                break status;
-            }
-            if started.elapsed() >= Duration::from_secs(45) {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = output.join();
-                let _ = errors.join();
-                return Err(error(
-                    "syncTimeout",
-                    "飞书请求超时；本地便签已保留，稍后可重试",
-                ));
-            }
-            thread::sleep(Duration::from_millis(50));
-        };
-        let out = output
-            .join()
-            .map_err(|_| error("syncCli", "读取CLI结果失败"))??;
-        let err = errors
-            .join()
-            .map_err(|_| error("syncCli", "读取CLI错误失败"))??;
-        let envelope: Value = serde_json::from_slice(if status.success() { &out } else { &err })
-            .map_err(|_| {
-                error(
-                    "syncCli",
-                    "Lark CLI 返回无效结果，请在终端检查登录状态和版本",
-                )
-            })?;
-        if !status.success() || envelope["ok"] != true {
-            // Never return raw stderr/request bodies or credentials to the UI.
-            let code = envelope
-                .pointer("/error/code")
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            return Err(error("syncApi", format!("飞书请求失败（{}）。请检查当前用户登录、表权限和字段结构；不会自动切换为机器人", code)));
-        }
-        envelope
-            .get("data")
-            .cloned()
-            .ok_or_else(|| error("syncProtocol", "CLI结果缺少 data"))
+        run_cli(&self.settings, &self.work_dir, &args)
     }
 
     pub fn check_schema(&self) -> Result<(), AppError> {
@@ -625,12 +550,102 @@ impl CliRemote {
             {
                 return Err(error(
                     "syncSchema",
-                    format!("数据表缺少 {name}（{kind}）字段；请按 lark/fields.json 创建专用表"),
+                    format!("数据表缺少 {name}（{kind}）字段；请使用为便签准备的专用表"),
                 ));
             }
         }
         Ok(())
     }
+}
+
+pub(super) fn run_cli(
+    settings: &SyncSettings,
+    work_dir: &Path,
+    args: &[String],
+) -> Result<Value, AppError> {
+    let executable = super::lark_connection::find_cli(&settings.cli_path)?;
+    let mut command = Command::new(executable);
+    if !settings.profile.is_empty() {
+        command.args(["--profile", &settings.profile]);
+    }
+    command
+        .args(args)
+        .args(["--as", "user", "--format", "json"])
+        .current_dir(work_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("LARKSUITE_CLI_NO_UPDATE_NOTIFIER", "1")
+        .env("LARKSUITE_CLI_NO_SKILLS_NOTIFIER", "1");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let mut child = command.spawn().map_err(|_| {
+        error(
+            "syncCliMissing",
+            "无法启动 Lark CLI；请先在这台电脑安装并登录 Lark CLI，程序会自动查找",
+        )
+    })?;
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let output = thread::spawn(move || {
+        let mut b = Vec::new();
+        stdout.read_to_end(&mut b).map(|_| b)
+    });
+    let errors = thread::spawn(move || {
+        let mut b = Vec::new();
+        stderr.read_to_end(&mut b).map(|_| b)
+    });
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if started.elapsed() >= Duration::from_secs(45) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = output.join();
+            let _ = errors.join();
+            return Err(error(
+                "syncTimeout",
+                "飞书请求超时；本地便签已保留，稍后可重试",
+            ));
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    let out = output
+        .join()
+        .map_err(|_| error("syncCli", "读取CLI结果失败"))??;
+    let err = errors
+        .join()
+        .map_err(|_| error("syncCli", "读取CLI错误失败"))??;
+    let envelope: Value = serde_json::from_slice(if status.success() { &out } else { &err })
+        .map_err(|_| {
+            error(
+                "syncCli",
+                "Lark CLI 返回无效结果，请在终端检查登录状态和版本",
+            )
+        })?;
+    if !status.success() || envelope["ok"] != true {
+        // Never return raw stderr/request bodies or credentials to the UI.
+        let code = envelope
+            .pointer("/error/code")
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        return Err(error(
+            "syncApi",
+            format!(
+                "飞书请求失败（{}）。请检查当前用户登录、表权限和字段结构；不会自动切换为机器人",
+                code
+            ),
+        ));
+    }
+    envelope
+        .get("data")
+        .cloned()
+        .ok_or_else(|| error("syncProtocol", "CLI结果缺少 data"))
 }
 
 fn string_cell(row: &serde_json::Map<String, Value>, name: &str) -> Result<String, AppError> {

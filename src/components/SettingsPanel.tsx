@@ -22,6 +22,7 @@ import { applyTheme, watchSystemTheme } from "../features/settings/theme";
 import { LOCALE_OPTIONS } from "../locales/locale-whitelist";
 import { SlidingButtonGroup } from "./SlidingButtonGroup";
 import { SyncSettingsSection } from "../features/sync/SyncSettingsSection";
+import { ShortcutHelp } from "../features/shortcuts/ShortcutHelp";
 
 const HARMONY_FONT_LICENSE_URL = new URL("../assets/fonts/LICENSE_Fonts", import.meta.url).href;
 
@@ -117,6 +118,7 @@ export function SettingsPanel({ config, onChange, onMigrateDataDir, onClose }: S
 
       <div className="flex-1 overflow-y-auto scrollbar-hidden px-4 py-4 space-y-5">
         <SyncSettingsSection />
+        <ShortcutHelp />
         <section className="space-y-2">
           <label className="block text-[11px] font-body text-ink-faint">
             {t("settings.theme.label", { defaultValue: "主题" })}
@@ -674,7 +676,7 @@ function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
   const isChecking = checkState === "checking";
 
   return (
-    <div ref={containerRef} className="relative space-y-1.5">
+    <div ref={containerRef} data-shortcut-recorder="true" className="relative space-y-1.5">
       <div className="flex gap-2">
         <button
           type="button"

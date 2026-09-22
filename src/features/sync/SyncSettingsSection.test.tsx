@@ -8,6 +8,9 @@ import {
   syncNow,
   markSyncEditor,
   syncStatusLabel,
+  connectSync,
+  disconnectSync,
+  getSyncConnection,
 } from "./api";
 import { SyncSettingsSection } from "./SyncSettingsSection";
 import { invoke } from "@tauri-apps/api/core";
@@ -20,12 +23,20 @@ describe("飞书同步", () => {
     await saveSyncSettings(DEFAULT_SYNC_SETTINGS);
     await syncNow();
     await markSyncEditor("note1");
+    await getSyncConnection();
+    await connectSync("https://example.feishu.cn/base/test?table=tblTest");
+    await disconnectSync();
     expect(invoke).toHaveBeenCalledWith("lark_sync_settings_get");
     expect(invoke).toHaveBeenCalledWith("lark_sync_settings_save", {
       settings: DEFAULT_SYNC_SETTINGS,
     });
     expect(invoke).toHaveBeenCalledWith("lark_sync_now");
     expect(invoke).toHaveBeenCalledWith("lark_sync_editor_state", { noteId: "note1" });
+    expect(invoke).toHaveBeenCalledWith("lark_sync_connection_get");
+    expect(invoke).toHaveBeenCalledWith("lark_sync_connect", {
+      url: "https://example.feishu.cn/base/test?table=tblTest",
+    });
+    expect(invoke).toHaveBeenCalledWith("lark_sync_disconnect");
   });
   test("distinguishes errors, pending edits and first sync", () => {
     expect(syncStatusLabel(EMPTY_SYNC_STATUS)).toContain("未启用");
@@ -42,11 +53,17 @@ describe("飞书同步", () => {
   });
   test("explains upload scope, privacy and unsupported attachments", () => {
     const markup = renderToStaticMarkup(
-      <SyncSettingsSection initialSettings={DEFAULT_SYNC_SETTINGS} />,
+      <SyncSettingsSection initialConnection={{ url: "", enabled: false }} />,
     );
     expect(markup).toContain("当前数据目录中的便签");
     expect(markup).toContain("图片附件不跨设备同步");
-    expect(markup).toContain("保存并校验");
+    expect(markup).toContain("连接并同步");
+    expect(markup.match(/<input\b/g)).toHaveLength(1);
+    expect(markup).toContain('type="url"');
+    expect(markup).not.toContain("Base token");
+    expect(markup).not.toContain("数据表 ID");
+    expect(markup).not.toContain("CLI profile");
+    expect(markup).not.toContain('type="number"');
     expect(markup).toContain("已删除");
     expect(markup).not.toContain('type="password"');
     expect(markup).toMatch(/disabled=""[^>]*>立即同步/);
@@ -54,12 +71,14 @@ describe("飞书同步", () => {
   test("shows last success and failure without claiming synced", () => {
     const markup = renderToStaticMarkup(
       <SyncSettingsSection
-        initialSettings={{ ...DEFAULT_SYNC_SETTINGS, enabled: true }}
+        initialConnection={{ url: "", enabled: true }}
         initialStatus={{ ...EMPTY_SYNC_STATUS, enabled: true, phase: "error", error: "权限不足" }}
       />,
     );
     expect(markup).toContain("权限不足");
     expect(markup).toContain("同步失败");
     expect(markup).not.toContain("飞书已同步");
+    expect(markup).toContain("已保留原有连接");
+    expect(markup).toContain("暂停同步");
   });
 });

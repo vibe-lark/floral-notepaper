@@ -522,6 +522,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_name,
             lark_sync_commands::lark_sync_settings_get,
+            lark_sync_commands::lark_sync_connection_get,
+            lark_sync_commands::lark_sync_connect,
+            lark_sync_commands::lark_sync_disconnect,
             lark_sync_commands::lark_sync_settings_save,
             lark_sync_commands::lark_sync_status,
             lark_sync_commands::lark_sync_now,
