@@ -83,6 +83,7 @@ import {
   metadataFromNote,
 } from "../features/notes/noteUtils";
 import type { CategoryGroup } from "../features/notes/noteUtils";
+import { useNoteDrag } from "../features/notes/useNoteDrag";
 import {
   getNoteContextMenuItems,
   type NoteContextMenuAction,
@@ -359,7 +360,20 @@ export function MainWindow({
   const [viewMode, setViewMode] = useState<ViewMode>(
     normalizeViewMode(initialConfig?.defaultViewMode ?? "split"),
   );
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("sidebar-collapsed", String(sidebarCollapsed));
+    } catch {
+      // The sidebar remains usable when storage is unavailable.
+    }
+  }, [sidebarCollapsed]);
   const [content, setContent] = useState("");
   const [title, setTitle] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -392,7 +406,6 @@ export function MainWindow({
   const [noteMenuMode, setNoteMenuMode] = useState<"main" | "move">("main");
   const [renamingCategory, setRenamingCategory] = useState<string | null>(null);
   const [renameCategoryValue, setRenameCategoryValue] = useState("");
-  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
   const [settingsOverlay, setSettingsOverlay] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth < 1080 : true,
   );
@@ -1531,13 +1544,32 @@ export function MainWindow({
 
   const handleMoveNote = async (noteId: string, targetCategory: string) => {
     setNoteMenuClosing(true);
-    try {
-      await moveNoteCategory(noteId, targetCategory);
+    // Serialize moves with autosave so an in-flight save cannot restore the old category.
+    const run = saveQueueRef.current.then(async () => {
+      const note = notesRef.current.find((item) => item.id === noteId);
+      if (!note || note.category === targetCategory) return;
+      const moved = await moveNoteCategory(noteId, targetCategory);
+      notesRef.current = notesRef.current.map((item) => (item.id === noteId ? moved : item));
+      setNotes(notesRef.current);
+      if (selectedIdRef.current === noteId) setActiveCategory(targetCategory);
+      setCollapsedCategories((previous) => {
+        const next = new Set(previous);
+        next.delete(targetCategory);
+        return next;
+      });
       await refreshNotes();
+    });
+    saveQueueRef.current = run.catch(() => undefined);
+    try {
+      await run;
     } catch (error) {
       showToast(getErrorMessage(error));
     }
   };
+  const { drag: noteDrag, startNoteDrag } = useNoteDrag((id, category) => {
+    void handleMoveNote(id, category);
+  });
+  const dragOverCategory = noteDrag?.targetCategory ?? null;
 
   const handleCreateCategory = async () => {
     const name = categoryInputValue.trim();
@@ -2001,10 +2033,31 @@ export function MainWindow({
     ? aboutButtonLabel
     : t("main.window.about", { defaultValue: "关于" });
 
+  const sidebarToggleLabel = sidebarCollapsed
+    ? t("main.window.expandSidebar", { defaultValue: "展开侧栏" })
+    : t("main.window.collapseSidebar", { defaultValue: "收起侧栏" });
+
   return (
     <div className="w-full h-screen flex flex-col">
       <div className="relative noise-bg bg-cloud overflow-hidden flex flex-col flex-1">
         <BackgroundLayer config={settingsConfig} />
+        {noteDrag && (
+          <div
+            role="status"
+            className="fixed z-[10000] pointer-events-none max-w-56 rounded-lg border border-bamboo/30 bg-cloud px-3 py-2 text-xs text-ink shadow-lg"
+            style={{
+              left: Math.min(noteDrag.x + 14, window.innerWidth - 240),
+              top: Math.min(noteDrag.y + 14, window.innerHeight - 64),
+            }}
+          >
+            <div className="truncate">{getDisplayTitle(noteDrag.note, t)}</div>
+            {dragOverCategory !== null && (
+              <div className="mt-1 text-bamboo truncate">
+                → {dragOverCategory || t("main.category.uncategorized", { defaultValue: "未分类" })}
+              </div>
+            )}
+          </div>
+        )}
         <div
           className={`relative z-10 flex items-center justify-between h-11 bg-paper/55 backdrop-blur-[1px] border-b border-paper-deep/30 shrink-0 select-none cursor-default ${
             isMacOS ? "pl-20 pr-5" : "pl-5 pr-0"
@@ -2012,6 +2065,32 @@ export function MainWindow({
           onMouseDown={handleTitleBarMouseDown}
         >
           <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              aria-controls="notes-sidebar"
+              aria-expanded={!sidebarCollapsed}
+              aria-label={sidebarToggleLabel}
+              title={sidebarToggleLabel}
+              className="flex items-center gap-1.5 h-7 px-2 shrink-0 rounded-lg text-xs text-ink-faint hover:text-bamboo hover:bg-bamboo-mist/50 transition-colors cursor-pointer"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M9 3v18" />
+                <path d={sidebarCollapsed ? "m13 9 3 3-3 3" : "m16 9-3 3 3 3"} />
+              </svg>
+              <span>{sidebarToggleLabel}</span>
+            </button>
             <span className="text-[15px] font-serif font-medium text-ink-soft tracking-wide leading-none">
               花笺
             </span>
@@ -2190,7 +2269,10 @@ export function MainWindow({
 
         <div className="relative z-10 flex flex-1 min-h-0">
           <div
-            className="border-r border-paper-deep/30 bg-paper/40 shrink-0 overflow-hidden transition-[width] duration-[600ms]"
+            id="notes-sidebar"
+            aria-hidden={sidebarCollapsed}
+            inert={sidebarCollapsed}
+            className={`border-paper-deep/30 bg-paper/40 shrink-0 overflow-hidden transition-[width] duration-200 motion-reduce:transition-none ${sidebarCollapsed ? "" : "border-r"}`}
             style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
           >
             <div className="flex flex-col h-full" style={{ width: `${sidebarWidth}px` }}>
@@ -2340,7 +2422,7 @@ export function MainWindow({
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto px-2 pb-2">
+              <div data-note-list className="flex-1 overflow-y-auto px-2 pb-2">
                 <div className="space-y-0.5">
                   {externalFiles.length > 0 && (
                     <>
@@ -2432,42 +2514,29 @@ export function MainWindow({
                       return (
                         <div
                           key="__uncategorized__"
+                          data-note-category=""
                           className={`rounded-lg transition-all duration-200 ${
                             dragOverCategory === "" ? "bg-bamboo/10 ring-1 ring-bamboo/20" : ""
                           }`}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = "move";
-                            setDragOverCategory("");
-                          }}
-                          onDragLeave={(e) => {
-                            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                              setDragOverCategory(null);
-                            }
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            setDragOverCategory(null);
-                            const noteId = e.dataTransfer.getData("text/plain");
-                            if (noteId) void handleMoveNote(noteId, "");
-                          }}
                         >
+                          <div className="px-3 py-1.5 text-[11px] text-ink-faint">
+                            {t("main.category.uncategorized", { defaultValue: "未分类" })}
+                          </div>
                           {group.notes.map((note) => {
                             const isSelected = note.id === selectedId;
                             const isHovered = note.id === hoveredId;
                             return (
                               <div
                                 key={note.id}
-                                draggable
-                                onDragStart={(e) => {
-                                  e.dataTransfer.setData("text/plain", note.id);
-                                  e.dataTransfer.effectAllowed = "move";
-                                }}
+                                data-note-id={note.id}
+                                draggable={false}
+                                onDragStart={(event) => event.preventDefault()}
+                                onPointerDown={(event) => startNoteDrag(event, note)}
                                 onClick={() => void handleSelectNote(note.id)}
                                 onContextMenu={(event) => handleOpenNoteMenu(event, note.id)}
                                 onMouseEnter={() => setHoveredId(note.id)}
                                 onMouseLeave={() => setHoveredId(null)}
-                                className={`w-full text-left rounded-xl px-3 py-2.5 transition-all duration-[600ms] cursor-pointer group relative ${
+                                className={`w-full text-left rounded-xl px-3 py-2.5 transition-all duration-[600ms] cursor-grab select-none group relative ${noteDrag?.note.id === note.id ? "opacity-40" : ""} ${
                                   isSelected
                                     ? "bg-bamboo-mist/70"
                                     : isHovered
@@ -2518,7 +2587,11 @@ export function MainWindow({
                     const isCollapsed = collapsedCategories.has(group.category);
 
                     return (
-                      <div key={group.category} className="px-2 mb-0.5">
+                      <div
+                        key={group.category}
+                        data-note-category={group.category}
+                        className="px-2 mb-0.5"
+                      >
                         <div
                           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg group/cat cursor-pointer select-none transition-all duration-200 ${
                             dragOverCategory === group.category
@@ -2538,18 +2611,6 @@ export function MainWindow({
                             });
                             setCategoryMenuClosing(false);
                             setCategoryMenuConfirmDelete(false);
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = "move";
-                            setDragOverCategory(group.category);
-                          }}
-                          onDragLeave={() => setDragOverCategory(null)}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            setDragOverCategory(null);
-                            const noteId = e.dataTransfer.getData("text/plain");
-                            if (noteId) void handleMoveNote(noteId, group.category);
                           }}
                         >
                           <svg
@@ -2604,25 +2665,7 @@ export function MainWindow({
                         </div>
 
                         <div className={`category-body ${isCollapsed ? "" : "expanded"}`}>
-                          <div
-                            className="category-body-inner bg-bamboo/[0.03] border border-t-0 border-bamboo/10 rounded-b-lg pb-1 pt-1"
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              e.dataTransfer.dropEffect = "move";
-                              setDragOverCategory(group.category);
-                            }}
-                            onDragLeave={(e) => {
-                              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                                setDragOverCategory(null);
-                              }
-                            }}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              setDragOverCategory(null);
-                              const noteId = e.dataTransfer.getData("text/plain");
-                              if (noteId) void handleMoveNote(noteId, group.category);
-                            }}
-                          >
+                          <div className="category-body-inner bg-bamboo/[0.03] border border-t-0 border-bamboo/10 rounded-b-lg pb-1 pt-1">
                             {group.notes.length === 0 ? (
                               <div className="px-3 py-3 text-center text-[11px] text-ink-ghost/50">
                                 {t("main.category.emptyFolder", { defaultValue: "空文件夹" })}
@@ -2635,16 +2678,15 @@ export function MainWindow({
                                 return (
                                   <div
                                     key={note.id}
-                                    draggable
-                                    onDragStart={(e) => {
-                                      e.dataTransfer.setData("text/plain", note.id);
-                                      e.dataTransfer.effectAllowed = "move";
-                                    }}
+                                    data-note-id={note.id}
+                                    draggable={false}
+                                    onDragStart={(event) => event.preventDefault()}
+                                    onPointerDown={(event) => startNoteDrag(event, note)}
                                     onClick={() => void handleSelectNote(note.id)}
                                     onContextMenu={(event) => handleOpenNoteMenu(event, note.id)}
                                     onMouseEnter={() => setHoveredId(note.id)}
                                     onMouseLeave={() => setHoveredId(null)}
-                                    className={`w-full text-left rounded-lg mx-1 px-2.5 py-2 transition-all duration-[600ms] cursor-pointer group relative ${
+                                    className={`w-full text-left rounded-lg mx-1 px-2.5 py-2 transition-all duration-[600ms] cursor-grab select-none group relative ${noteDrag?.note.id === note.id ? "opacity-40" : ""} ${
                                       isSelected
                                         ? "bg-bamboo-mist/70"
                                         : isHovered
@@ -2728,32 +2770,6 @@ export function MainWindow({
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex items-center justify-between px-4 h-10 border-b border-paper-deep/20 shrink-0 bg-paper/20">
               <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg text-ink-ghost hover:text-ink-faint hover:bg-paper-warm transition-all cursor-pointer"
-                  title={
-                    sidebarCollapsed
-                      ? t("main.window.expandSidebar", { defaultValue: "展开侧栏" })
-                      : t("main.window.collapseSidebar", { defaultValue: "收起侧栏" })
-                  }
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <line x1="9" y1="3" x2="9" y2="21" />
-                  </svg>
-                </button>
-
-                <div className="h-4 w-px bg-paper-deep/30 mx-1" />
-
                 <button
                   onClick={() => void handlePinEntry()}
                   disabled={!selectedId}

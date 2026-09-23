@@ -55,6 +55,9 @@ export function groupNotesByCategory(
     groups.set(cat, []);
   }
 
+  // Keep a drop target for moving categorized notes back to the root, even when empty.
+  if (allCategories.length > 0) groups.set("", []);
+
   for (const note of notes) {
     const key = note.category || "";
     const list = groups.get(key);
